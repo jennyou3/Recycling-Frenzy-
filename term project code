@@ -1,0 +1,428 @@
+from cmu_cs3_graphics import * 
+import random 
+import math 
+
+def onAppStart(app):
+    app.level = 1
+    app.rows = 7*app.level
+    app.cols = 7*app.level
+    app.topBotMargin = 35
+    app.sideMargin = 5 
+    
+    app.personRadius = 15 # tbd 
+    app.personX = app.personRadius
+    app.personY = app.personRadius
+    app.character = Character(app.personX,app.personY)
+
+    #trashAmount increases with each level 
+    app.trashAmount = 3*app.level
+    app.trashRadius = 10//app.level #tbd
+    app.trashTypes = ['compost', 'plastic', 'landfill'] 
+    #list of trash bins, like compost, recycling, paper, landfill, etc 
+    app.trashBinNumber = 5*app.level
+    app.binLength = 15
+    app.trashBinTypes = ['compost', 'plastic', 'landfill'] 
+    app.trashList = randomTrashList(app)
+    app.trashBinList = randomTrashBinList(app)
+
+    app.trashInHand = None
+    print(app.trashInHand)
+    app.maze = Graph(app.rows)
+    app.mazePathsList = mazeGenerator(app.maze)
+    app.mazePathsDict = getPathsDict(app.mazePathsList)
+
+    app.levelDone = False 
+    app.score = 0
+
+#from https://www.cs.cmu.edu/~112/lecture3/notes/notes-animations-part2.html
+def getCellBounds(app,row,col):
+    gridWidth = app.width - 2*app.sideMargin 
+    gridHeight = app.height - 2*app.topBotMargin
+    
+    cellWidth = gridWidth/app.cols
+    cellHeight = gridHeight / app.rows
+    
+    left = app.sideMargin + (cellWidth *col)
+    top = app.topBotMargin + (cellHeight * row)
+    
+    return left, top, cellWidth, cellHeight
+
+#from https://www.cs.cmu.edu/~112/lecture3/notes/notes-animations-part2.html
+def getCell(app, x, y):
+    # return (row, col) in which (x, y)
+
+    gridWidth  = app.width - 2*app.sideMargin
+    gridHeight = app.height - 2*app.topBotMargin
+    cellWidth  = gridWidth / app.cols
+    cellHeight = gridHeight / app.rows
+
+    row = int((y - app.topBotMargin) / cellHeight)
+    col = int((x - app.sideMargin) / cellWidth)
+
+    return (row, col)
+
+def getCellWalls(app, row, col):
+    vertex = str(row)+str(col)
+    possPaths = app.mazePathsDict[vertex]
+    walls = []
+    
+    #top edge is not there
+    if (row-1,col) not in possPaths:
+        walls.append('top')
+    #bottom edge not there
+    if (row+1, col) not in possPaths:
+        walls.append('bot')
+    #right edge not there
+    if (row, col+1) not in possPaths:
+        walls.append('right')
+    #left edge not there
+    if (row, col-1) not in possPaths:
+        walls.append('left')
+
+    return walls  
+
+def distance(x0,y0,x1,y1):
+    return math.sqrt((x1-x0)**2 + (y1-y0)**2)
+
+def randomLocations(app):
+    row = random.randint(0,app.rows-1)
+    col = random.randint(0,app.cols-1)
+    left, top, cellWidth, cellHeight = getCellBounds(app,row,col)
+    x = left + 0.2*cellWidth
+    y = top + 0.2*cellHeight 
+    return (x,y)
+
+def randomTrashList(app):
+    trashList = []
+    trashLocations = []
+    for i in range(app.trashAmount):
+        x, y = randomLocations(app)
+        if (x,y) not in trashLocations:
+            trashList.append(Trash(x,y, random.choice(app.trashTypes)))
+            trashLocations.append((x,y))
+    return trashList
+
+def randomTrashBinList(app):
+    trashBinList = []
+    trashBinLocations = []
+    #generate the first three bins manually 
+    for i in range(len(app.trashTypes)):
+        x, y = randomLocations(app)
+        if (x,y) not in trashBinLocations:
+            for trash in app.trashList:
+                if distance(trash.x, trash.y, x,y) > 6*app.trashRadius:
+                    trashBinList.append(TrashBin(x,y,app.trashTypes[i]))
+                    trashBinLocations.append((x,y))
+    
+    for i in range(app.trashBinNumber-3):
+        x, y = randomLocations(app)
+        if (x,y) not in trashBinLocations: 
+            for trash in app.trashList:
+                if distance(trash.x, trash.y, x,y) > 6*app.trashRadius:
+                    trashBinList.append(TrashBin(x,y,app.trashTypes[i]))
+                    trashBinLocations.append((x,y))
+    return trashBinList
+
+class Character(object):
+    def __init__(self,x,y):
+        self.x = x
+        self.y = y
+    
+    def isTouchingTrash(self,app):
+        for trash in app.trashList:
+            if distance(app.personX, app.personY, trash.x,trash.y) < app.personRadius:
+                return trash 
+        return None
+    
+    def isTouchingTrashBin(self,app):
+        for bin in app.trashBinList:
+            ## fix thiS! the bins are squares and the person is a circle so change the center 
+            if distance(app.personX, app.personY, bin.x+, bin.y) < 1.5*app.personRadius:
+                return bin
+        return None 
+
+class Trash(object):
+    def __init__(self,x, y, type):
+        self.x = x
+        self.y = y
+        self.type = type
+
+class TrashBin(object):
+    def __init__(self,x, y, type):
+        self.x = x
+        self.y = y
+        self.type = type 
+
+class Graph(object):
+    def __init__(self,gridSize):
+        self.gridSize = gridSize
+        self.vertices = self.getVertices()
+    
+    def getVertices(self):
+        rows = cols = self.gridSize
+        vertexList = []
+        for row in range(rows):
+            for col in range(cols):
+                verticeTuple = (row,col)
+                vertexList.append(verticeTuple)
+        return vertexList
+    
+    #given a vertex, gets the adjacent vertices (up, down, left, right)
+    def getAdjacentVertices(self,verticeTuple):
+        rows = self.gridSize
+        cols = self.gridSize
+        x = verticeTuple[0]
+        y = verticeTuple[1]
+
+        adjacentList = [(x+1, y), (x-1,y),(x,y+1) , (x,y-1)]
+
+        #checking if on an edge, removes point if so
+        if x == cols-1:
+            adjacentList.remove((x+1,y))
+        if x == 0:
+            adjacentList.remove((x-1,y))
+        if y == rows -1:
+            adjacentList.remove((x,y+1))
+        if y == 0:
+            adjacentList.remove((x,y-1))
+        return adjacentList
+
+def dropOffTrash(app):
+    typeOfTrash = app.trashInHand.type 
+    x = app.personX -5
+    y = app.personY 
+    app.trashInHand = None
+    app.trashList.append(Trash(x,y,typeOfTrash))
+
+def pickUpTrash(app):
+    for trash in app.trashList:
+        if distance(trash.x, trash.y, app.personX, app.personY) < app.trashRadius + app.personRadius:
+            app.trashInHand = trash
+            app.trashList.remove(trash)
+
+def movePerson(app,dx,dy):
+    app.personX += 10*dx 
+    app.personY += 10*dy
+    
+    if (app.personX - app.personRadius < 0 or 
+    app.personX + app.personRadius > app.width 
+    or app.personY - app.personRadius < 0 
+    or app.personY + app.personRadius > app.height):
+        app.personX -= 10*dx 
+        app.personY -= 10*dy
+        
+    if characterIsTouchingWall(app):
+        app.personX -= 10*dx 
+        app.personY -= 10*dy
+
+    trash = app.character.isTouchingTrash(app)
+    if trash != None:
+        app.personX -= 10*dx 
+        app.personY -= 10*dy
+    # if trash != None:
+    #     if app.trashInHand == None:
+    #         trash.x = app.personX
+    #         trash.y = app.personY
+    #         app.trashInHand = trash
+    #         app.trashList.remove(trash)
+    #     else:
+    #         app.personX -= 10*dx 
+    #         app.personY -= 10*dy
+
+    bin =  app.character.isTouchingTrashBin(app)
+    #if bin is not none, there is a bin there 
+    if bin != None:
+        if app.trashInHand != None:
+            if bin.type == app.trashInHand.type:
+                app.score += 5
+                app.trashInHand = None 
+            else:
+                app.score -= 3
+        app.personX -= 10*dx 
+        app.personY -= 10*dy
+
+    if app.trashInHand != None:
+        app.trashInHand.x = app.personX 
+        app.trashInHand.y = app.personY  
+
+def characterIsTouchingWall(app):
+        row, col = getCell(app, app.personX, app.personY)
+        walls = getCellWalls(app, row, col)
+        if row == col == 0:
+            walls.remove('top')
+        elif row == app.rows-1 and col == app.cols - 1:
+            walls.remove('bot')
+        left, top, cellWidth, cellHeight = getCellBounds(app,row,col)
+        rightWall = left + cellWidth
+        topWall = top 
+        leftWall = left 
+        botWall = top + cellHeight
+        for direction in walls:
+            if direction == 'right':
+                dist = distanceBetweenWallAndPerson(app, rightWall, direction)
+            elif direction == 'top':
+                dist = distanceBetweenWallAndPerson(app, topWall, direction)
+            elif direction == 'left':
+                dist = distanceBetweenWallAndPerson(app, leftWall, direction)                
+            elif direction == 'bot':
+                dist = distanceBetweenWallAndPerson(app, botWall, direction)
+            if dist < app.personRadius:
+                return True
+        return False
+
+def distanceBetweenWallAndPerson(app, wall, direction):
+    
+    if direction == 'right':
+        return wall - app.personX 
+    elif direction == 'top':
+        return app.personY - wall
+    elif direction == 'bot':
+        return wall - app.personY 
+    elif direction == 'left':
+        return app.personX - wall 
+
+#https://weblog.jamisbuck.org/2011/1/10/maze-generation-prim-s-algorithm
+def mazeGenerator(maze):
+    edgeList = []
+    verticeList = []
+    allVertices = maze.vertices 
+    firstVertex = (0,0)
+    verticeList.append(firstVertex)
+    
+    while len(verticeList) < len(allVertices):
+        adjacents = []
+        #getting list of adjacents 
+        for vertex in verticeList:
+            potentialAdjacents = maze.getAdjacentVertices(vertex)
+            for v in potentialAdjacents:
+                if v not in adjacents and v not in verticeList:
+                    adjacents.append(v)
+        
+        #getting the second node that the first node will connect to via an edge
+        secondVertex = random.choice(adjacents)
+        secondAdjacents = maze.getAdjacentVertices(secondVertex)
+        possibleSecondAdjacents = []
+
+        for adjacent in secondAdjacents:
+            if adjacent in verticeList:
+                possibleSecondAdjacents.append(adjacent)
+
+        edge = (random.choice(possibleSecondAdjacents),secondVertex)
+        edgeList.append(edge)
+        verticeList.append(secondVertex)
+    return(edgeList)
+
+def getPathsDict(pathsList):
+    pathsDict = dict()
+
+    for v1, v2 in pathsList:
+        stringOfV1 = str(v1[0])+str(v1[1])
+        stringOfV2 = str(v2[0])+str(v2[1])
+        if stringOfV1 not in pathsDict:
+            pathsDict[stringOfV1] = set()
+        if stringOfV2 not in pathsDict:
+            pathsDict[stringOfV2] = set()
+        
+        pathsDict[stringOfV1].add(v2)
+        pathsDict[stringOfV2].add(v1)
+    return pathsDict 
+
+def onStep(app):
+    if app.trashList == [] and app.trashInHand == None:
+        app.levelDone = True 
+
+def onKeyPress(app, key):
+    (dx, dy) = (0, 0)
+    if key == 'left':
+        (dx, dy) =  (-1, 0)
+    elif key == 'right':
+        (dx, dy) = (1, 0)
+    elif key == 'up':
+        (dx, dy) = (0,-1)
+    elif key == 'down':
+        (dx, dy) = (0,1)
+    movePerson(app,dx,dy)
+
+    if key == 'd':
+        if app.trashInHand != None:
+            dropOffTrash(app)
+    elif key == 't':
+        if app.trashInHand == None:
+            pickUpTrash(app)
+
+def drawMaze(app):
+    for row in range(app.rows):
+        for col in range(app.cols):
+            left, top, cellWidth, cellHeight = getCellBounds(app,row,col)
+            walls = getCellWalls(app,row,col)
+            if row == col == 0:
+                walls.remove('top')
+            elif row == app.rows-1 and col == app.cols-1:
+                walls.remove('bot')
+            if 'top' in walls:
+                drawLine(left, top, left+cellWidth,top, fill = 'black')
+            if 'right' in walls:
+                drawLine(left+cellWidth, top, left+cellWidth,top+cellHeight)
+            if 'bot' in walls:
+                drawLine(left, top+cellHeight, left+cellWidth, top+cellHeight)
+            if 'left' in walls:
+                drawLine(left, top, left, top+cellHeight)
+
+def drawCharacter(app):
+    drawCircle(app.personX, app.personY, app.personRadius, fill ='purple')
+
+def drawTrash(app):
+    for trash in app.trashList:
+        if trash.type == 'compost':
+            color = 'green'
+        elif trash.type == 'plastic':
+            color = 'blue'
+        elif trash.type == 'landfill':
+            color = 'brown'
+        drawCircle(trash.x, trash.y, app.trashRadius, fill = color)
+
+def drawTrashBin(app):
+    for bin in app.trashBinList:
+        if bin.type == 'compost':
+            color = 'green'
+        elif bin.type == 'plastic':
+            color = 'blue'
+        elif bin.type == 'landfill':
+            color = 'brown'
+        drawRect(bin.x, bin.y, app.binLength, app.binLength, fill = color )
+
+def drawTrashInHand(app):
+    if app.trashInHand != None:
+        trash = app.trashInHand
+        type = app.trashInHand.type 
+        if type == 'compost':
+            color = 'green'
+        elif type == 'plastic':
+            color = 'blue'
+        elif type == 'landfill':
+            color = 'brown'
+
+        drawCircle(trash.x, trash.y, app.trashRadius, fill= color)
+
+def drawCompletedLevelScreen(app):
+    if app.levelDone == True:
+        drawLabel(f'Congratulations! You have completed level {app.level} !', app.width/2, 20)
+        drawLabel('Enter the door on the bottom right corner of the map', app.width/2, 30)
+
+def drawScore(app):
+    drawLabel(app.score, 3*app.width/4, 20, size = 12) 
+
+def redrawAll(app):
+    drawMaze(app)
+    drawCharacter(app)
+    drawTrash(app)
+    drawTrashInHand(app)
+    drawTrashBin(app)
+    drawScore(app)
+    drawCompletedLevelScreen(app)
+
+def main():
+    print("Hello!")
+    runApp(width=510, height=540)
+    print("Done")
+main()
