@@ -4,18 +4,31 @@ import math
 
 def onAppStart(app):
     app.level = 1
-    app.rows = 7*app.level
-    app.cols = 7*app.level
+    app.rows = 8
+    app.cols = 8
     app.topBotMargin = 35
     app.sideMargin = 5 
     
-    app.personRadius = 15 # tbd 
+    app.displayScreen = True 
+    app.gameVisible = False 
+    app.endingScreen = False
+    app.personRadius = 10 # tbd 
     app.personX = app.personRadius
     app.personY = app.personRadius
     app.character = Character(app.personX,app.personY)
+    app.dogVisible = None 
+    app.dogColor = 'deepPink'
+    app.dogRadius = 12
+    app.dogX = None
+    app.dogY = None
+    app.pathToTrash = None 
+    app.targetTrash = None 
+    app.dogHoldingTrash = None 
+    app.pathToBin = None 
+    app.targetBin = None
 
     #trashAmount increases with each level 
-    app.trashAmount = 3*app.level
+    app.trashAmount = 8*app.level
     app.trashRadius = 10//app.level #tbd
     app.trashTypes = ['compost', 'plastic', 'landfill'] 
     #list of trash bins, like compost, recycling, paper, landfill, etc 
@@ -26,46 +39,39 @@ def onAppStart(app):
     app.trashBinList = randomTrashBinList(app)
 
     app.trashInHand = None
-    print(app.trashInHand)
     app.maze = Graph(app.rows)
     app.mazePathsList = mazeGenerator(app.maze)
     app.mazePathsDict = getPathsDict(app.mazePathsList)
 
     app.levelDone = False 
     app.score = 0
+    app.stepsPerSecond = 40
 
 #from https://www.cs.cmu.edu/~112/lecture3/notes/notes-animations-part2.html
 def getCellBounds(app,row,col):
     gridWidth = app.width - 2*app.sideMargin 
     gridHeight = app.height - 2*app.topBotMargin
-    
     cellWidth = gridWidth/app.cols
     cellHeight = gridHeight / app.rows
-    
     left = app.sideMargin + (cellWidth *col)
     top = app.topBotMargin + (cellHeight * row)
-    
     return left, top, cellWidth, cellHeight
 
 #from https://www.cs.cmu.edu/~112/lecture3/notes/notes-animations-part2.html
 def getCell(app, x, y):
     # return (row, col) in which (x, y)
-
     gridWidth  = app.width - 2*app.sideMargin
     gridHeight = app.height - 2*app.topBotMargin
     cellWidth  = gridWidth / app.cols
     cellHeight = gridHeight / app.rows
-
     row = int((y - app.topBotMargin) / cellHeight)
     col = int((x - app.sideMargin) / cellWidth)
-
     return (row, col)
 
 def getCellWalls(app, row, col):
     vertex = str(row)+str(col)
     possPaths = app.mazePathsDict[vertex]
     walls = []
-    
     #top edge is not there
     if (row-1,col) not in possPaths:
         walls.append('top')
@@ -78,7 +84,6 @@ def getCellWalls(app, row, col):
     #left edge not there
     if (row, col-1) not in possPaths:
         walls.append('left')
-
     return walls  
 
 def distance(x0,y0,x1,y1):
@@ -88,8 +93,8 @@ def randomLocations(app):
     row = random.randint(0,app.rows-1)
     col = random.randint(0,app.cols-1)
     left, top, cellWidth, cellHeight = getCellBounds(app,row,col)
-    x = left + 0.2*cellWidth
-    y = top + 0.2*cellHeight 
+    x = left + 0.5*cellWidth
+    y = top + 0.5*cellHeight 
     return (x,y)
 
 def randomTrashList(app):
@@ -113,7 +118,6 @@ def randomTrashBinList(app):
                 if distance(trash.x, trash.y, x,y) > 6*app.trashRadius:
                     trashBinList.append(TrashBin(x,y,app.trashTypes[i]))
                     trashBinLocations.append((x,y))
-    
     for i in range(app.trashBinNumber-3):
         x, y = randomLocations(app)
         if (x,y) not in trashBinLocations: 
@@ -130,14 +134,14 @@ class Character(object):
     
     def isTouchingTrash(self,app):
         for trash in app.trashList:
-            if distance(app.personX, app.personY, trash.x,trash.y) < app.personRadius:
+            print(trash.x, trash.y, app.trashRadius, app.personRadius)
+            if distance(app.personX, app.personY, trash.x,trash.y) < app.personRadius+0.4*app.trashRadius:
                 return trash 
         return None
     
     def isTouchingTrashBin(self,app):
         for bin in app.trashBinList:
-            ## fix thiS! the bins are squares and the person is a circle so change the center 
-            if distance(app.personX, app.personY, bin.x+, bin.y) < 1.5*app.personRadius:
+            if distance(app.personX, app.personY, bin.x+0.5*app.binLength, bin.y+0.5*app.binLength) < app.personRadius+0.5*app.binLength:
                 return bin
         return None 
 
@@ -175,7 +179,6 @@ class Graph(object):
         y = verticeTuple[1]
 
         adjacentList = [(x+1, y), (x-1,y),(x,y+1) , (x,y-1)]
-
         #checking if on an edge, removes point if so
         if x == cols-1:
             adjacentList.remove((x+1,y))
@@ -200,6 +203,58 @@ def pickUpTrash(app):
             app.trashInHand = trash
             app.trashList.remove(trash)
 
+def getPath(app,pathDict,start, target):
+    path = [target]
+    targetPlaceHolder = target
+    while start not in path:
+        targetPlaceHolder = pathDict[targetPlaceHolder]
+        path.insert(0, targetPlaceHolder)
+    return path
+
+#https://www.cs.cmu.edu/~112/notes/student-tp-guides/Pathfinding.pdf
+def BFS(app, start, target):
+    queue = [start]
+    visitedNodes = set()
+    pathDictionary = dict()
+    visitedNodes.add(start)
+    while queue != []:
+        currNode = queue.pop(0)
+        if currNode == target:
+            path = getPath(app,pathDictionary, start, target)
+            return path
+        nodeNeighbors = app.maze.getAdjacentVertices(currNode)
+        for neighbor in nodeNeighbors:
+            edge =(currNode, neighbor)
+            if neighbor not in visitedNodes:
+                if (edge[0], edge[1]) in app.mazePathsList or (edge[1], edge[0]) in app.mazePathsList:
+                    visitedNodes.add(neighbor)
+                    queue.append(neighbor)
+                    pathDictionary[neighbor] = currNode 
+    return None 
+
+def getClosestTrash(app):
+    bestDist = None 
+    bestTrash = None 
+    for trash in app.trashList:
+        currDist = distance(trash.x,trash.y, app.personX, app.personY)
+        if bestDist == None or currDist < bestDist:
+            bestDist = currDist 
+            bestTrash = trash
+    row, col = getCell(app, bestTrash.x, bestTrash.y)
+    return row, col, bestTrash
+
+def getClosestBin(app, x, y, trashType):
+    bestDist = None 
+    bestBin = None 
+    for bin in app.trashBinList:
+        if bin.type == trashType:
+            currDist = distance(bin.x, bin.y, x, y)
+            if bestDist == None or currDist < bestDist:
+                bestDist = currDist 
+                bestBin = bin
+    row, col = getCell(app, bestBin.x, bestBin.y)
+    return row, col, bestBin
+
 def movePerson(app,dx,dy):
     app.personX += 10*dx 
     app.personY += 10*dy
@@ -211,24 +266,15 @@ def movePerson(app,dx,dy):
         app.personX -= 10*dx 
         app.personY -= 10*dy
         
-    if characterIsTouchingWall(app):
-        app.personX -= 10*dx 
-        app.personY -= 10*dy
+    if app.trashList != []:
+        if characterIsTouchingWall(app):
+            app.personX -= 10*dx 
+            app.personY -= 10*dy
 
     trash = app.character.isTouchingTrash(app)
     if trash != None:
         app.personX -= 10*dx 
         app.personY -= 10*dy
-    # if trash != None:
-    #     if app.trashInHand == None:
-    #         trash.x = app.personX
-    #         trash.y = app.personY
-    #         app.trashInHand = trash
-    #         app.trashList.remove(trash)
-    #     else:
-    #         app.personX -= 10*dx 
-    #         app.personY -= 10*dy
-
     bin =  app.character.isTouchingTrashBin(app)
     #if bin is not none, there is a bin there 
     if bin != None:
@@ -252,6 +298,7 @@ def characterIsTouchingWall(app):
             walls.remove('top')
         elif row == app.rows-1 and col == app.cols - 1:
             walls.remove('bot')
+
         left, top, cellWidth, cellHeight = getCellBounds(app,row,col)
         rightWall = left + cellWidth
         topWall = top 
@@ -271,7 +318,6 @@ def characterIsTouchingWall(app):
         return False
 
 def distanceBetweenWallAndPerson(app, wall, direction):
-    
     if direction == 'right':
         return wall - app.personX 
     elif direction == 'top':
@@ -288,7 +334,7 @@ def mazeGenerator(maze):
     allVertices = maze.vertices 
     firstVertex = (0,0)
     verticeList.append(firstVertex)
-    
+
     while len(verticeList) < len(allVertices):
         adjacents = []
         #getting list of adjacents 
@@ -303,10 +349,10 @@ def mazeGenerator(maze):
         secondAdjacents = maze.getAdjacentVertices(secondVertex)
         possibleSecondAdjacents = []
 
+        #picking the vertice for the edge 
         for adjacent in secondAdjacents:
             if adjacent in verticeList:
                 possibleSecondAdjacents.append(adjacent)
-
         edge = (random.choice(possibleSecondAdjacents),secondVertex)
         edgeList.append(edge)
         verticeList.append(secondVertex)
@@ -314,7 +360,6 @@ def mazeGenerator(maze):
 
 def getPathsDict(pathsList):
     pathsDict = dict()
-
     for v1, v2 in pathsList:
         stringOfV1 = str(v1[0])+str(v1[1])
         stringOfV2 = str(v2[0])+str(v2[1])
@@ -326,10 +371,6 @@ def getPathsDict(pathsList):
         pathsDict[stringOfV1].add(v2)
         pathsDict[stringOfV2].add(v1)
     return pathsDict 
-
-def onStep(app):
-    if app.trashList == [] and app.trashInHand == None:
-        app.levelDone = True 
 
 def onKeyPress(app, key):
     (dx, dy) = (0, 0)
@@ -343,12 +384,119 @@ def onKeyPress(app, key):
         (dx, dy) = (0,1)
     movePerson(app,dx,dy)
 
-    if key == 'd':
+    if key == 's':
+        app.gameVisible = True
+        app.displayScreen = False
+    elif key == 'd':
         if app.trashInHand != None:
             dropOffTrash(app)
     elif key == 't':
         if app.trashInHand == None:
             pickUpTrash(app)
+    elif key == 'r' and app.dogVisible != True:
+        row, col = getCell(app, app.personX, app.personY)
+        left, top, cellWidth, cellHeight = getCellBounds(app,row, col)
+        app.dogX = left + 0.5*cellWidth
+        app.dogY = top + 0.5*cellHeight
+        app.dogVisible = True
+        trashRow, trashCol, bestTrash = getClosestTrash(app)
+        app.targetTrash = bestTrash
+        binRow, binCol, bestBin = getClosestBin(app, bestTrash.x, bestTrash.y, bestTrash.type)
+        app.targetBin = bestBin
+        personRow, personCol = getCell(app, app.personX, app.personY)
+        app.pathToTrash = BFS(app, (personRow, personCol), (trashRow, trashCol))
+        app.pathToBin = BFS(app,(trashRow, trashCol), (binRow, binCol))
+            
+def getDirection(node1, node2):
+    #right or left
+    if node1[0] == node2[0]:
+        if node1[1] > node2[1]:
+            return 'left'
+        else:
+            return 'right'
+    else:
+        if node1[0] > node2[0]:
+            return 'up'
+        else:
+            return 'down'
+
+def updateDogLocation(app, node1, node2):
+    move = 5
+    row, col = getCell(app, app.dogX, app.dogY)
+    if app.pathToTrash != None:
+        node1 = app.pathToTrash[0]
+        node2 = app.pathToTrash[1]
+        dir = getDirection(node1, node2)
+        if dir == 'left':
+            app.dogX -= move
+        elif dir == 'right':
+            app.dogX += move 
+        elif dir == 'up':
+            app.dogY -= move
+        elif dir == 'down':
+            app.dogY += move
+    elif app.pathToBin != None:
+        node1 = app.pathToBin[0]
+        node2 = app.pathToBin[1]
+        dir = getDirection(node1, node2)
+        if dir == 'left':
+            app.dogX -= move
+        elif dir == 'right':
+            app.dogX += move 
+        elif dir == 'up':
+            app.dogY -= move
+        elif dir == 'down':
+            app.dogY += move
+
+def onStep(app):
+    if app.dogVisible != None:
+        if app.pathToTrash != None:
+            row, col = getCell(app, app.dogX, app.dogY)
+            if (row,col) != app.pathToTrash[-1]: 
+                node1, node2 = app.pathToTrash[0], app.pathToTrash[1]
+                left, top, cellWidth, cellHeight = getCellBounds(app,node2[0], node2[1])
+                node2x = left +0.5*cellWidth
+                node2y = top + 0.5*cellHeight
+
+                if distance(app.dogX, app.dogY, node2x, node2y) < app.dogRadius:
+                    app.pathToTrash.pop(0)    
+                else:
+                    updateDogLocation(app,node1, node2)
+            elif distance(app.targetTrash.x, app.targetTrash.y, app.dogX, app.dogY) < app.dogRadius:
+                app.trashList.remove(app.targetTrash)
+                app.dogHoldingTrash = app.targetTrash
+                app.pathToTrash = None 
+                app.targetTrash = None 
+            else:
+                updateDogLocation(app, (row,col), app.pathToTrash[-1])
+                
+        elif app.pathToBin != None:
+            row, col = getCell(app, app.dogX, app.dogY)
+            if (row,col) != app.pathToBin[-1]: 
+                node1, node2 = app.pathToBin[0], app.pathToBin[1]
+                left, top, cellWidth, cellHeight = getCellBounds(app,node2[0], node2[1])
+                node2x = left +0.5*cellWidth
+                node2y = top + 0.5*cellHeight
+
+                if distance(app.dogX, app.dogY, node2x, node2y) < app.dogRadius:
+                    app.pathToBin.pop(0)    
+                else:
+                    updateDogLocation(app,node1, node2)
+            elif distance(app.targetBin.x, app.targetBin.y, app.dogX, app.dogY) < app.dogRadius:
+                app.pathToBin = None 
+                app.targetBin = None 
+                app.dogHoldingTrash = None 
+            else:
+                updateDogLocation(app, (row,col), app.pathToBin[-1])
+        if app.targetBin == None and app.targetTrash == None:
+            app.score += 1
+            app.dogVisible = None
+    if app.trashList == []:
+        app.levelDone = True 
+        if distance(app.personX, app.personY, 9*app.width/10 + 10, app.height-20) < 1.25*app.personRadius:
+            app.gameVisible = False
+            app.endingScreen = True
+            app.levelDone = False  
 
 def drawMaze(app):
     for row in range(app.rows):
@@ -369,26 +517,26 @@ def drawMaze(app):
                 drawLine(left, top, left, top+cellHeight)
 
 def drawCharacter(app):
-    drawCircle(app.personX, app.personY, app.personRadius, fill ='purple')
+    drawCircle(app.personX, app.personY, app.personRadius, fill ='orchid')
 
 def drawTrash(app):
     for trash in app.trashList:
         if trash.type == 'compost':
-            color = 'green'
+            color = 'limeGreen'
         elif trash.type == 'plastic':
-            color = 'blue'
+            color = 'turquoise'
         elif trash.type == 'landfill':
-            color = 'brown'
+            color = 'peru'
         drawCircle(trash.x, trash.y, app.trashRadius, fill = color)
 
 def drawTrashBin(app):
     for bin in app.trashBinList:
         if bin.type == 'compost':
-            color = 'green'
+            color = 'limeGreen'
         elif bin.type == 'plastic':
-            color = 'blue'
+            color = 'turquoise'
         elif bin.type == 'landfill':
-            color = 'brown'
+            color = 'peru'
         drawRect(bin.x, bin.y, app.binLength, app.binLength, fill = color )
 
 def drawTrashInHand(app):
@@ -396,33 +544,76 @@ def drawTrashInHand(app):
         trash = app.trashInHand
         type = app.trashInHand.type 
         if type == 'compost':
-            color = 'green'
+            color = 'limeGreen'
         elif type == 'plastic':
-            color = 'blue'
+            color = 'turquoise'
         elif type == 'landfill':
-            color = 'brown'
+            color = 'peru'
+        drawCircle(trash.x, trash.y, app.trashRadius*.55, fill= color)
 
-        drawCircle(trash.x, trash.y, app.trashRadius, fill= color)
+def drawDog(app):
+    if app.dogVisible == True:
+        drawCircle(app.dogX, app.dogY, app.dogRadius, fill = app.dogColor)
+
+def drawDogTrash(app):
+    if app.dogHoldingTrash != None:
+        type = app.dogHoldingTrash.type 
+        if type == 'compost':
+            color = 'limeGreen'
+        elif type == 'plastic':
+            color = 'turquoise'
+        elif type == 'landfill':
+            color = 'peru'
+        drawCircle(app.dogX, app.dogY, app.dogRadius/1.5, fill = color) 
 
 def drawCompletedLevelScreen(app):
     if app.levelDone == True:
-        drawLabel(f'Congratulations! You have completed level {app.level} !', app.width/2, 20)
-        drawLabel('Enter the door on the bottom right corner of the map', app.width/2, 30)
+        drawLabel(f'Congratulations! You have completed this game !', app.width/2, 10)
+        drawLabel('Enter the door on the bottom right corner of the map', app.width/2, 25)
+
+def drawDisplayScreen(app):
+    if app.displayScreen == True:
+        drawLabel('Welcome to Recycling Frenzy!!', app.width/2, app.height/6, size = 20)
+        drawLabel('Instructions: the boxes are the recycling bins and the circles are the trash.', app.width/2, app.height/5+20, size = 15)
+        drawLabel('Navigate the maze, pick up all the trash and put them in the correct bin', app.width/2, app.height/5+45, size = 15)
+        drawLabel('Controls:', app.width/2, app.height/5+85, size = 15)
+        drawLabel('Up/down/left/right arrow moves in the given direction', app.width/2, app.height/5+105, size = 15)  
+        drawLabel('t to pick up trash', app.width/2, app.height/5+125, size = 15)  
+        drawLabel('d to drop trash', app.width/2, app.height/5+145, size = 15)  
+        drawLabel('r to call your dog sidekick to help you (doggo can only be called in the maze)', app.width/2, app.height/5+165, size = 15)  
+        drawLabel('Earn 5 points if you correctly put trash in its respective bin', app.width/2, app.height/5+190, size = 15)   
+        drawLabel('Earn 1 point if your doggo puts the trash in', app.width/2, app.height/5+210, size = 15)
+        drawLabel('Note: doggo has the special ability to walk through trash and bins', app.width/2, app.height/5+300, size = 15)           
+        drawLabel('Click s when you are ready to start the game', app.width/2, app.height/5+320, size = 15)  
 
 def drawScore(app):
-    drawLabel(app.score, 3*app.width/4, 20, size = 12) 
+    drawLabel(f'Score: {app.score}', 9*app.width/10, 20, size = 12) 
+
+def drawDoor(app):
+    if app.levelDone == True:
+        drawRect(9*app.width/10, app.height-20, 30,10, fill = 'brown')
+
+def drawEndingScreen(app):
+    if app.endingScreen == True:
+        drawLabel('Congratulations again on completing Recycling Frenzy!!', app.width/2, app.height/6, size = 20)
+        drawLabel('You are now well equipped with the knowledge to properly recycle trash', app.width/2, app.height/5+20, size = 15)
+        drawLabel('Go out there and make the world a greener place!', app.width/2, app.height/5+45, size = 15)
 
 def redrawAll(app):
-    drawMaze(app)
-    drawCharacter(app)
-    drawTrash(app)
-    drawTrashInHand(app)
-    drawTrashBin(app)
-    drawScore(app)
+    if app.gameVisible == True:
+        drawMaze(app)
+        drawCharacter(app)
+        drawTrash(app)
+        drawTrashInHand(app)
+        drawTrashBin(app)
+        drawDog(app)
+        drawDogTrash(app)
+        drawScore(app)
+        drawDoor(app)
+    drawDisplayScreen(app)
     drawCompletedLevelScreen(app)
+    drawEndingScreen(app)
 
 def main():
-    print("Hello!")
     runApp(width=510, height=540)
-    print("Done")
 main()
